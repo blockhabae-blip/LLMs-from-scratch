@@ -1,3 +1,3 @@
-# Chapter 7: Instruction and Preference Finetuning
+# Chapter 7: Instruction Finetuning
 
 In progress ...
