@@ -80,8 +80,6 @@ class MultiHeadAttention(nn.Module):
             keys, values = keys_new, values_new
             self.ptr_cur = 0  # keep pointer sane if you interleave modes
         ####################################################
-
-
         # Compute scaled dot-product attention (aka self-attention) with a causal mask
         attn_scores = queries @ keys.transpose(2, 3)  # Dot product for each head
 
