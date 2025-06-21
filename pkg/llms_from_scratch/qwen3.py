@@ -87,7 +87,7 @@ class TransformerBlock(nn.Module):
         # Shortcut connection for attention block
         shortcut = x
         x = self.norm1(x)
-        x = self.att(x, mask, cos, sin)  # Shape [batch_size, num_tokens, emb_size]
+        x = self.att(x, mask, cos, sin,)  # Shape [batch_size, num_tokens, emb_size]
         x = x + shortcut  # Add the original input back
 
         # Shortcut connection for feed-forward block
