@@ -4,7 +4,7 @@
 # Code: https://github.com/rasbt/LLMs-from-scratch
 
 # This file collects all the relevant code that we covered thus far
-# throughout Chapters 3-4.
+# throughout Chapters 3-4, adapted to use Grouped-Query Attention (GQA).
 # This file can be run as a standalone script.
 
 import argparse
@@ -83,7 +83,8 @@ class GroupedQueryAttention(nn.Module):
         # Shape: (b, num_heads, num_tokens, num_tokens)
         attn_scores = queries @ keys.transpose(2, 3)  # Dot product for each head
 
-        # Use the mask to fill attention scores
+        ####################################################
+        # causal mask
         num_tokens_Q = queries.shape[-2]
         num_tokens_K = keys.shape[-2]
         device = queries.device
@@ -101,6 +102,7 @@ class GroupedQueryAttention(nn.Module):
         k_positions = torch.arange(num_tokens_K, device=device, dtype=torch.long)
         mask = q_positions.unsqueeze(-1) < k_positions.unsqueeze(0)
 
+        # Use the mask to fill attention scores
         attn_scores = attn_scores.masked_fill(mask, -torch.inf)
 
         attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
@@ -111,7 +113,7 @@ class GroupedQueryAttention(nn.Module):
         context_vec = (attn_weights @ values).transpose(1, 2)
 
         # Combine heads, where self.d_out = self.num_heads * self.head_dim
-        context_vec = context_vec.reshape(b, num_tokens, self.d_out)
+        context_vec = context_vec.contiguous().view(b, num_tokens, self.d_out)
         context_vec = self.out_proj(context_vec)  # optional projection
 
         return context_vec
@@ -184,7 +186,7 @@ class TransformerBlock(nn.Module):
 
         # x = self.att(x)   # Shape [batch_size, num_tokens, emb_size]
         ####################################################
-        # NEW
+        #  KV cache-related
         x = self.att(x, use_cache=use_cache)
         ####################################################
 
@@ -211,7 +213,7 @@ class GPTModel(nn.Module):
         # self.trf_blocks = nn.Sequential(
         #    *[TransformerBlock(cfg) for _ in range(cfg["n_layers"])])
         ####################################################
-        # NEW
+        #  KV cache-related
         self.trf_blocks = nn.ModuleList(
             [TransformerBlock(cfg) for _ in range(cfg["n_layers"])])
 
@@ -228,8 +230,7 @@ class GPTModel(nn.Module):
         # pos_embeds = self.pos_emb(torch.arange(seq_len, device=in_idx.device))
 
         ####################################################
-        # NEW
-
+        #  KV cache-related
         if use_cache:
             pos_ids = torch.arange(self.current_pos, self.current_pos + seq_len, device=in_idx.device, dtype=torch.long)
             self.current_pos += seq_len
@@ -243,7 +244,7 @@ class GPTModel(nn.Module):
 
         # x = self.trf_blocks(x)
         ####################################################
-        # NEW
+        # KV cache-related
         for blk in self.trf_blocks:
             x = blk(x, use_cache=use_cache)
         ####################################################
@@ -253,7 +254,7 @@ class GPTModel(nn.Module):
         return logits
 
     ####################################################
-    # NEW
+    # KV cache-related
     def reset_kv_cache(self):
         for blk in self.trf_blocks:
             blk.att.reset_cache()
@@ -261,34 +262,6 @@ class GPTModel(nn.Module):
     ####################################################
 
 
-def generate_text_simple(model, idx, max_new_tokens, context_size):
-    # idx is (B, T) array of indices in the current context
-    for _ in range(max_new_tokens):
-
-        # Crop current context if it exceeds the supported context size
-        # E.g., if LLM supports only 5 tokens, and the context size is 10
-        # then only the last 5 tokens are used as context
-        idx_cond = idx[:, -context_size:]
-
-        # Get the predictions
-        with torch.no_grad():
-            logits = model(idx_cond)
-
-        # Focus only on the last time step
-        # (batch, n_token, vocab_size) becomes (batch, vocab_size)
-        logits = logits[:, -1, :]
-
-        # Get the idx of the vocab entry with the highest logits value
-        idx_next = torch.argmax(logits, dim=-1, keepdim=True)  # (batch, 1)
-
-        # Append sampled index to the running sequence
-        idx = torch.cat((idx, idx_next), dim=1)  # (batch, n_tokens+1)
-
-    return idx
-
-
-####################################################
-# NEW
 def generate_text_simple_cached(model, idx, max_new_tokens,
                                 context_size=None, use_cache=True):
     model.eval()
@@ -314,7 +287,6 @@ def generate_text_simple_cached(model, idx, max_new_tokens,
                 idx = torch.cat([idx, next_idx], dim=1)
 
     return idx
-####################################################
 
 
 def main():
@@ -324,6 +296,7 @@ def main():
     parser.add_argument("--n_layers", type=int, default=12, help="Number of transformer blocks.")
     parser.add_argument("--n_kv_groups", type=int, default=2, help="Number of key/value groups.")
     parser.add_argument("--max_new_tokens", type=int, default=200, help="Number of tokens to generate.")
+
     args = parser.parse_args()
 
     start_context = "Hello, I am"
